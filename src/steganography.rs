@@ -3,7 +3,7 @@ use crate::random_matrix::RandMatrix;
 use image::io::Reader as ImageReader;
 use std::error::Error;
 use std::path::Path;
-use image::{DynamicImage, GenericImageView, RgbImage, Rgb, ImageBuffer, Rgba, RgbaImage};
+use image::{DynamicImage, GenericImageView, RgbImage, Rgb, ImageBuffer, Rgba, RgbaImage, EncodableLayout};
 use std::ops::Index;
 
 #[derive(Debug)]
@@ -22,10 +22,16 @@ impl RMSteg {
         }
     }
 
-    pub fn hide<P>(&self, path: P, cipher_text: &[u8]) -> ImageBuffer<image::Rgba<u8>, Vec<u8>>
+    pub fn hide<P>(&self, path: P, cipher_text: &[u8], verbose: bool) -> ImageBuffer<image::Rgba<u8>, Vec<u8>>
     where  P: AsRef<Path>
     {
+        if verbose {
+            println!("Raw bytes in binary byte: {:?}", cipher_text);
+        }
         let cipher_text_9 = Self::transform(cipher_text);
+        if verbose {
+            println!("Bytes in Nine: {:?}", cipher_text_9.as_bytes());
+        }
         let carrier = ImageReader::open(path).unwrap().decode().unwrap();
         let (carrier_x, carrier_y) = carrier.dimensions();
         let payload_len = cipher_text_9.len();
@@ -34,6 +40,10 @@ impl RMSteg {
         }
         let mut payload = Self::transform_length_prefix(payload_len);
         payload.extend_from_slice(cipher_text_9.as_slice());
+        if verbose {
+            println!("Payload Length: {}", payload_len);
+            println!("Add length prefix: {:?}", payload.as_bytes());
+        }
         // 要生成的图片
         let mut img: RgbaImage = ImageBuffer::new(carrier_x, carrier_y);
         let mut pixel_x_mut= &mut Rgba([0,0,0,0]);
@@ -43,6 +53,10 @@ impl RMSteg {
         let mut state = 0;
         let mut payload_cursor = 0;
         let mut flag = false;
+        let mut g1_x= 0;
+        let mut g2_x= 0;
+        let mut g1_y= 0;
+        let mut g2_y= 0;
         for (x, y, pixel) in img.enumerate_pixels_mut() {
             if flag {
                 let pixel_carrier = carrier.get_pixel(x, y);
@@ -52,18 +66,25 @@ impl RMSteg {
             if state == 0 {
                 pixel_x_carrier = carrier.get_pixel(x, y);
                 pixel_x_mut = pixel;
+                g1_x = x;
+                g1_y = y;
                 state = 1;
             } else {
                 pixel_y_carrier = carrier.get_pixel(x, y);
-                //println!("x: {}, y: {}, Carrier_Pixel_x: {:?}, Carrier_pixel_y: {:?}", x, y, pixel_x_carrier, pixel_y_carrier);
                 pixel_y_mut = pixel;
+                g2_x = x;
+                g2_y = y;
                 let g1 = *pixel_x_carrier.index(0);
                 let g2 = *pixel_y_carrier.index(0);
                 let payload_byte = payload[payload_cursor];
                 let (new_x, new_y) = self.random_matrix.search_val(g1 as usize, g2 as usize, payload_byte);
-                //println!("({}, {}) => ({}, {})", g1, g2, new_x, new_y);
-                //println!("Payload: {}, reveal: {}", payload_byte, self.random_matrix.get_val_from_random_matrix(new_x as usize, new_y as usize));
-                //println!("[{}]Hide: {}", payload_cursor, payload_byte);
+                if verbose {
+                    println!("[{}]Hide: {}", payload_cursor, payload_byte);
+                    println!("Piexl g1 {} at ({}, {})", g1, g1_x, g1_y);
+                    println!("Piexl g2 {} at ({}, {})", g2, g2_x, g2_y);
+                    println!("Found Payload {} at ({}, {}) of Carrier Image", payload_byte, new_x, new_y);
+                    println!("Convert ({}, {}) => ({}, {})", g1, g2, new_x, new_y);
+                }
                 *pixel_x_mut = Rgba([new_x, *pixel_x_carrier.index(1), *pixel_x_carrier.index(2), *pixel_x_carrier.index(3)]);
                 *pixel_y_mut = Rgba([new_y, *pixel_y_carrier.index(1), *pixel_y_carrier.index(2), *pixel_y_carrier.index(3)]);
                 payload_cursor += 1;
@@ -77,7 +98,7 @@ impl RMSteg {
     }
 
     /// 解密
-    pub fn reveal<P>(&self, path: P) -> String
+    pub fn reveal<P>(&self, path: P, verbose: bool) -> String
     where P:AsRef<Path>
     {
         let carrier = image::open(path).unwrap();
@@ -92,21 +113,37 @@ impl RMSteg {
         let mut prefix_cnt = 0;
         let mut byte_cnt = 0;
         let mut break_flag = false;
+        let mut g1_x = 0;
+        let mut g2_x = 0;
+        let mut g1_y = 0;
+        let mut g2_y = 0;
         for y in 0..carrier_y {
             for x in 0..carrier_x {
                 if state == 0 {
                     pixel_x_carrier = carrier.get_pixel(x, y);
+                    g1_x = x;
+                    g1_y = y;
                     state = 1;
                 } else {
                     pixel_y_carrier = carrier.get_pixel(x, y);
+                    g2_x = x;
+                    g2_y = y;
                     let g1 = *pixel_x_carrier.index(0);
                     let g2 = *pixel_y_carrier.index(0);
                     let cipher_text_byte = self.random_matrix.get_val_from_random_matrix(g1 as usize, g2 as usize);
+                    if verbose {
+                        println!("Piexl g1 {} at ({}, {})", g1, g1_x, g1_y);
+                        println!("Piexl g2 {} at ({}, {})", g2, g2_x, g2_y);
+                        println!("Get Cipher text byte in ({}, {}) is {}", g1, g2, cipher_text_byte);
+                    }
                     cipher_text_in_9.push(cipher_text_byte);
                     prefix_cnt += 1;
                     byte_cnt += 1;
                     if prefix_cnt == prefix_length {
                         cipher_text_length = Self::re_transform_length_prefix(&mut cipher_text_in_9);
+                        if verbose {
+                            println!("Parse prefix Payload Length is {}", cipher_text_length);
+                        }
                         byte_cnt = 0;
                     }
                     if byte_cnt == cipher_text_length {
@@ -120,7 +157,13 @@ impl RMSteg {
                 break;
             }
         }
+        if verbose {
+            println!("Cipher text in 9 is {:?}", cipher_text_in_9.as_bytes());
+        }
         let cipher_text = Self::re_transform(cipher_text_in_9);
+        if verbose {
+            println!("Get the cipher text in bytes is {:?}", cipher_text.as_bytes());
+        }
         String::from_utf8(cipher_text).unwrap()
     }
     /// 判断隐写密文是否过大
@@ -177,10 +220,11 @@ impl RMSteg {
         }
         cipher_text
     }
+    /// 二进制转化为九进制
     fn transform(cipher_text: &[u8]) -> Vec<u8> {
         let mut cipher_text_9 = vec![];
-        /// 将一个字节映射为三个字节
-        /// item :0-255 => high: 0-9, middle: 0-9, low: 0-9
+        // 将一个字节映射为三个字节
+        // item :0-255 => high: 0-9, middle: 0-9, low: 0-9
         for item in cipher_text.iter() {
             let mut raw_byte = *item;
             let low = raw_byte % 9;

@@ -23,22 +23,25 @@ struct Opt {
     reveal_image_path: String,
     #[structopt(short="m", help="嵌入密文", default_value="Luweiba Never Give Up!")]
     cipher_text: String,
+    #[structopt(short, help="打印数据中间状态信息")]
+    verbose: bool,
 }
 fn main() {
     let opt: Opt = Opt::from_args();
     let seed = opt.seed;
     let rmsteg = RMSteg::new(seed);
+    let verbose = opt.verbose;
     // Reveal Mode
     if !opt.de_steg {
         let carrier_image_path = opt.carrier_image_path;
         let output_image_path = opt.output_image_path;
         let cipher_text = opt.cipher_text;
-        let output_image = rmsteg.hide(carrier_image_path.as_str(), cipher_text.as_bytes());
+        let output_image = rmsteg.hide(carrier_image_path.as_str(), cipher_text.as_bytes(), verbose);
         output_image.save(output_image_path.as_str()).unwrap();
         println!("Successfully Hide cipher text: {}", cipher_text);
     } else {
         let reveal_image_path = opt.reveal_image_path;
-        let cipher_text = rmsteg.reveal(reveal_image_path);
+        let cipher_text = rmsteg.reveal(reveal_image_path, verbose);
         println!("Cipher Text: {}", cipher_text);
     }
 }

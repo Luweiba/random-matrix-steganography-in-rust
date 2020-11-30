@@ -97,12 +97,12 @@ impl RandMatrix {
             y_idx = 0;
         }
         for _ in 0..3 {
+            let mut x_idx_tmp = x_idx;
             for _ in 0..3 {
-                //println!("x:{}, y: {}, {}, Payload: {}", x_idx, y_idx, self.inner_matrix[x_idx][y_idx], hide_payload);
-                if self.inner_matrix[x_idx][y_idx] == hide_payload {
-                    return (x_idx as u8, y_idx as u8);
+                if self.inner_matrix[x_idx_tmp][y_idx] == hide_payload {
+                    return (x_idx_tmp as u8, y_idx as u8);
                 }
-                x_idx = (x_idx + 1) % 256;
+                x_idx_tmp = (x_idx_tmp + 1) % 256;
             }
             y_idx = (y_idx + 1) % 256;
         }
